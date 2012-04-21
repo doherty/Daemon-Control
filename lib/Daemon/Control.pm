@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use POSIX qw(_exit setsid setuid setgid getuid getgid);
 use File::Spec;
+use File::Path qw(make_path);
 require 5.008001; # Supporting 5.8.1+
 
 our $VERSION = '0.000009'; # 0.0.9
@@ -71,7 +72,7 @@ sub new {
     }
 
     if ($self->run_dir) {
-        $self->run_dir( File::Spec->rel2abs($self->run_dir) )
+        die q/run_dir should be an absolute path, but you gave: / . $self->run_dir
             unless File::Spec->file_name_is_absolute( $self->run_dir );
 
         # Absolutize some filenames if they weren't already
@@ -217,17 +218,13 @@ sub write_pid {
     }
 }
 
-sub _create_run_dir {
+sub _ensure_run_dir_exists {
     my ($self) = @_;
     unless (-d $self->run_dir) { # don't re-create it
-        require File::Path;
-        eval {
-            File::Path::make_path($self->run_dir, {
-                owner   => $self->uid, # must be numeric
-                group   => $self->gid,
-            });
-        };
-        die $@ if $@;
+        make_path($self->run_dir, {
+            owner   => $self->uid, # these must be numeric
+            group   => $self->gid,
+        });
     }
 }
 
@@ -292,7 +289,7 @@ sub pretty_print {
 sub do_start {
     my ( $self ) = @_;
 
-    $self->_create_run_dir() if $self->run_dir;
+    $self->_ensure_run_dir_exists() if $self->run_dir;
 
     # Make sure the PID file exists.
     if ( ! -f $self->pid_file ) {
