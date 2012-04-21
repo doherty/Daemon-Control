@@ -11,7 +11,7 @@ $VERSION = eval $VERSION;
 
 my @accessors = qw(
     pid color_map name program program_args directory
-    uid path gid scan_name stdout_file stderr_file pid_file fork data 
+    uid path gid scan_name stdout_file stderr_file pid_file fork data run_dir
     lsb_start lsb_stop lsb_sdesc lsb_desc redirect_before_fork init_config
 );
 
@@ -69,6 +69,18 @@ sub new {
             $self->{$accessor} = delete $args->{$accessor};
         }
     }
+
+    if ($self->run_dir) {
+        $self->run_dir( File::Spec->rel2abs($self->run_dir) )
+            unless File::Spec->file_name_is_absolute( $self->run_dir );
+
+        # Absolutize some filenames if they weren't already
+        foreach my $attr (qw(pid_file stdout_file stderr_file)) {
+            $self->$attr( File::Spec->catfile( $self->run_dir, $self->$attr ) )
+                unless File::Spec->file_name_is_absolute( $self->$attr );
+        }
+    }
+
 
     # Set the user/groups.
     $self->user(delete $args->{user}) if exists $args->{user};
@@ -205,6 +217,20 @@ sub write_pid {
     }
 }
 
+sub _create_run_dir {
+    my ($self) = @_;
+    unless (-d $self->run_dir) { # don't re-create it
+        require File::Path;
+        eval {
+            File::Path::make_path($self->run_dir, {
+                owner   => $self->uid, # must be numeric
+                group   => $self->gid,
+            });
+        };
+        die $@ if $@;
+    }
+}
+
 sub _write_pid {
     my ( $self ) = @_;
     open my $sf, ">", $self->pid_file
@@ -265,6 +291,8 @@ sub pretty_print {
 
 sub do_start {
     my ( $self ) = @_;
+
+    $self->_create_run_dir() if $self->run_dir;
 
     # Make sure the PID file exists.
     if ( ! -f $self->pid_file ) {
@@ -572,6 +600,14 @@ $daemon->gid( 1001 );
 
 If provided, chdir to this directory before execution.
 
+=head2 run_dir
+
+If provided, this is the directory that will be created on start, owned by
+the user and group provided in user/group or uid/gid. If they are not already
+absolute filenames, L</pid_file>, L</stdout_file>, L</stderr_file> will be
+taken to be relative to this directory (i.e. inside it). A typical value
+might be F</var/run/$name>.
+
 =head2 path
 
 The path of the script you are using Daemon::Control in.  This will be used in 
@@ -604,12 +640,18 @@ in double fork more.
 
 $daemon->stdout_file( "/tmp/mydaemon.stdout" );
 
+If it is not already an absolute filename, and L</run_dir> is given, it will
+be taken as being relative to F<run_dir>.
+
 =head2 stderr_file
 
 If provided stderr will be redirected to the given file.  This is only supported
 in double fork more.
 
 $daemon->stderr_file( "/tmp/mydaemon.stderr" );
+
+If it is not already an absolute filename, and L</run_dir> is given, it will
+be taken as being relative to F<run_dir>.
 
 =head2 pid_file
 
@@ -619,6 +661,9 @@ mode will put it's PID.  Failure to follow this will most likely result in statu
 stop, and restart not working.
 
 $daemon->pid_file( "/tmp/mydaemon.pid" );
+
+If it is not already an absolute filename, and L</run_dir> is given, it will
+be taken as being relative to F<run_dir>.
 
 =head2 fork
 
